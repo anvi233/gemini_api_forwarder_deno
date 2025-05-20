@@ -29,12 +29,20 @@ async function handler(req: Request): Promise<Response> {
   }
 
   const requestUrl = new URL(req.url);
-  
-  // The path from the client SDK will be like /v1beta/models/gemini-2.0-flash:generateContent
+
+  // Handle simple root path requests (e.g., browser access or health checks)
+  if (requestUrl.pathname === "/" && req.method === "GET") {
+    console.log("[Forwarder] Received GET request for root path. Responding with status message.");
+    // Return a simple text response indicating the service is running
+    return new Response(
+      "Gemini API Forwarder is running. Use specific API paths for requests (e.g., /v1beta/models/your-model:generateContent).",
+      { status: 200, headers: { "Content-Type": "text/plain" } },
+    );
+  }
+
   // We need to append this path to GEMINI_API_TARGET_BASE
   const targetPath = requestUrl.pathname; // This should be the path the SDK intended for Google
   const targetSearchParams = requestUrl.searchParams.toString(); // Preserve query params if any
-
   // Construct the full target URL for Google's API
   // The SDK client should already be forming the correct path (e.g. /v1beta/models/...)
   // So we just prepend Google's base URL.
@@ -48,9 +56,12 @@ async function handler(req: Request): Promise<Response> {
   const keySeparator = fullTargetUrl.includes("?") ? "&" : "?";
   fullTargetUrl += `${keySeparator}key=${GOOGLE_API_KEY}`;
 
-
   console.log(`[Forwarder] Received ${req.method} request for: ${requestUrl.pathname}`);
-  console.log(`[Forwarder] Forwarding to Google API: ${fullTargetUrl.replace(GOOGLE_API_KEY, "GOOGLE_API_KEY_REDACTED")}`);
+  // Safer redaction for logging
+  const loggedTargetUrl = GOOGLE_API_KEY 
+    ? fullTargetUrl.replace(GOOGLE_API_KEY, "GOOGLE_API_KEY_REDACTED")
+    : fullTargetUrl;
+  console.log(`[Forwarder] Forwarding to Google API: ${loggedTargetUrl}`);
 
   try {
     let clientRequestBody: BodyInit | null = null;
