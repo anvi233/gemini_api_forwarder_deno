@@ -48,10 +48,72 @@ async function handler(req: Request): Promise<Response> {
 
   // Handle simple root path requests (e.g., browser access or health checks)
   if (requestUrl.pathname === "/" && req.method === "GET") {
-    console.log("[Forwarder] Received GET request for root path. Responding with status message.");
-    // Return a simple text response indicating the service is running
+    console.log("[Forwarder] Received GET request for root path. Performing Deno-to-Gemini test call.");
+
+    if (!GOOGLE_API_KEY) {
+       console.error("[Forwarder] GOOGLE_API_KEY is not set. Cannot perform Deno-to-Gemini test.");
+       return new Response(
+         "Deno-to-Gemini test failed: Server configuration error (API key missing).",
+         { status: 500, headers: { "Content-Type": "text/plain" } },
+       );
+    }
+
+    const testModel = "gemini-2.0-flash"; // Use a small, fast model for the test
+    const testPrompt = "Tell me a very short fun fact about Deno itself."; // Changed prompt slightly
+    const testApiEndpoint = `${GEMINI_API_TARGET_BASE}/v1beta/models/${testModel}:generateContent`;
+    const testFullUrl = `${testApiEndpoint}?key=${GOOGLE_API_KEY}`;
+
+    const testRequestBody = {
+      contents: [{ parts: [{ text: testPrompt }] }],
+      generationConfig: { maxOutputTokens: 100 }, // Limit response length
+    };
+
+    console.log(`[Forwarder] >>> Sending test POST request from Deno to Google API: ${testApiEndpoint.replace(GEMINI_API_TARGET_BASE, '...').substring(0, testApiEndpoint.indexOf(':') + 1)}...`);
+
+    try {
+      const testResponse = await fetch(testFullUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(testRequestBody),
+      });
+
+      console.log(`[Forwarder] <<< Received test response status from Google API: ${testResponse.status} ${testResponse.statusText}`);
+
+      let responseBodyText = "Could not read response body.";
+      try {
+         const responseBody = await testResponse.json();
+         responseBodyText = JSON.stringify(responseBody, null, 2); // Pretty print JSON
+      } catch (e) {
+         responseBodyText = await testResponse.text(); // Fallback to text if not JSON
+         console.warn("[Forwarder] Deno-to-Gemini test: Could not parse Google response as JSON, reading as text.", e.message);
+      }
+
+      if (testResponse.ok) { // Status code 2xx
+        console.log("[Forwarder] Deno-to-Gemini test call SUCCESS.");
+        return new Response(
+          `Deno-to-Gemini test call SUCCESS!\nStatus: ${testResponse.status}\nResponse Body:\n${responseBodyText}`,
+          { status: 200, headers: { "Content-Type": "text/plain" } },
+        );
+      } else { // Status code 4xx or 5xx
+        console.error("[Forwarder] Deno-to-Gemini test call FAILED with status:", testResponse.status);
+        return new Response(
+          `Deno-to-Gemini test call FAILED!\nStatus: ${testResponse.status}\nResponse Body:\n${responseBodyText}`,
+          { status: testResponse.status, headers: { "Content-Type": "text/plain" } },
+        );
+      }
+    } catch (error) {
+      console.error("[Forwarder] Error during Deno-to-Gemini test fetch:", error);
+      return new Response(
+        `Deno-to-Gemini test call ERROR!\nDetails: ${error.message || 'Unknown error'}`,
+        { status: 500, headers: { "Content-Type": "text/plain" } },
+      );
+    }
+
+    // Fallback response if somehow none of the above return
     return new Response(
-      "Gemini API Forwarder is running. Use specific API paths for requests (e.g., /v1beta/models/your-model:generateContent).",
+      "Gemini API Forwarder is running. Deno-to-Gemini test logic executed but did not explicitly return.",
       { status: 200, headers: { "Content-Type": "text/plain" } },
     );
   }
