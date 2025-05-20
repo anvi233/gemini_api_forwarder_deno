@@ -69,15 +69,19 @@ async function handler(req: Request): Promise<Response> {
         // Check if there's a body and if it's not already consumed
         if (req.body && !req.bodyUsed) {
             // Try to parse as JSON, but forward as is if not JSON
-            const contentType = req.headers.get("content-type");
+            const contentType = req.headers.get("content-type")?.toLowerCase();
             if (contentType && contentType.includes("application/json")) {
+                const rawBody = await req.text(); // Read body as text first
                 try {
-                    const jsonData = await req.json();
-                    clientRequestBody = JSON.stringify(jsonData);
+                    JSON.parse(rawBody); // Validate if it's JSON by attempting to parse
+                    clientRequestBody = rawBody; // Forward the original raw body (which is valid JSON text)
                     // console.log(`[Forwarder] Forwarding JSON body: ${clientRequestBody}`);
                 } catch (e) {
-                    console.warn("[Forwarder] Could not parse incoming body as JSON, forwarding as text/blob if possible.");
-                    clientRequestBody = await req.text(); // Or req.blob() if expecting binary
+                    console.warn(
+                        "[Forwarder] Incoming body declared as JSON but failed to parse. Forwarding as raw text. Error:",
+                        e.message // Log only the error message for brevity
+                    );
+                    clientRequestBody = rawBody; // Forward the raw text anyway, as the client sent it
                 }
             } else {
                  clientRequestBody = req.body; // Forward the stream directly
