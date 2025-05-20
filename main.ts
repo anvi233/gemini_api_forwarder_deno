@@ -17,9 +17,25 @@ if (Deno.env.get("DENO_DEPLOYMENT_ID") === undefined) {
 
 
 const GOOGLE_API_KEY = Deno.env.get("GOOGLE_API_KEY");
-const GEMINI_API_TARGET_BASE = "https://generativelanguage.googleapis.com"; // Base for Google's API
+const GEMINI_API_TARGET_BASE = Deno.env.get("GEMINI_API_TARGET_BASE") || "https://generativelanguage.googleapis.com";
+
+console.log(`[Forwarder] Initializing...`);
+console.log(`[Forwarder] GOOGLE_API_KEY first char: ${GOOGLE_API_KEY ? GOOGLE_API_KEY.substring(0,1) + '...' : 'Not Set'}`);
+console.log(`[Forwarder] GEMINI_API_TARGET_BASE: ${GEMINI_API_TARGET_BASE}`);
+if (!GOOGLE_API_KEY) {
+  console.error("[Forwarder] CRITICAL STARTUP ERROR: GOOGLE_API_KEY is not set in the environment. Service will fail to forward requests properly.");
+}
 
 async function handler(req: Request): Promise<Response> {
+  const incomingHeadersForLog: Record<string, string> = {};
+  req.headers.forEach((value, key) => {
+    incomingHeadersForLog[key] = value;
+  });
+  console.log(
+    `[Forwarder] <<< Incoming Request: ${req.method} ${req.url}`
+    // `Headers: ${JSON.stringify(incomingHeadersForLog)}` // Can be too verbose, uncomment if needed
+  );
+
   if (!GOOGLE_API_KEY) {
     console.error("CRITICAL: GOOGLE_API_KEY is not configured on the server.");
     return new Response(
@@ -61,7 +77,10 @@ async function handler(req: Request): Promise<Response> {
   const loggedTargetUrl = GOOGLE_API_KEY 
     ? fullTargetUrl.replace(GOOGLE_API_KEY, "GOOGLE_API_KEY_REDACTED")
     : fullTargetUrl;
-  console.log(`[Forwarder] Forwarding to Google API: ${loggedTargetUrl}`);
+  // console.log(`[Forwarder] Forwarding to Google API: ${loggedTargetUrl}`); // Old log
+  console.log(
+    `[Forwarder] >>> Forwarding to Google: ${req.method} ${loggedTargetUrl.substring(0, loggedTargetUrl.indexOf('?key=') + 5)}GOOGLE_API_KEY_REDACTED`
+  );
 
   try {
     let clientRequestBody: BodyInit | null = null;
@@ -89,17 +108,22 @@ async function handler(req: Request): Promise<Response> {
         }
     }
     
+    const headersToGoogle = new Headers(req.headers); // Start with client headers
+    // Potentially remove or modify certain headers before forwarding if needed
+    // e.g., headersToGoogle.delete('host'); // Deno's fetch will set the correct host
+
     const geminiResponse = await fetch(fullTargetUrl, {
       method: req.method,
-      headers: req.headers, // Forward most headers from the client
+      headers: headersToGoogle, // Forward (potentially modified) headers
       body: clientRequestBody,
       redirect: "follow", // Let fetch handle redirects if any from Google
     });
 
-    console.log(`[Forwarder] Google API response status: ${geminiResponse.status}`);
+    console.log(`[Forwarder] <<< Google API response status: ${geminiResponse.status} ${geminiResponse.statusText}`);
 
     // Create new headers for the response to the client, copying from Google's response
     const responseHeaders = new Headers(geminiResponse.headers);
+    // console.log("[Forwarder] Headers received from Google:", Object.fromEntries(responseHeaders.entries())); // Uncomment for debugging
     // Remove any Deno Deploy specific headers if necessary, or add CORS headers if needed
     // For simplicity, we're copying all headers.
 
@@ -110,11 +134,15 @@ async function handler(req: Request): Promise<Response> {
     });
 
   } catch (error) {
-    console.error("[Forwarder] Error during request forwarding:", error);
+    console.error("[Forwarder] Error during request forwarding to Google API:", error);
+    if (error.cause) {
+      console.error("[Forwarder] Error Cause:", error.cause);
+    }
     return new Response(
       JSON.stringify({
         error: "Failed to forward request to Gemini API",
-        details: error.message,
+        details: error.message || "Unknown error",
+        cause: error.cause ? String(error.cause) : "No cause provided"
       }),
       { status: 502, headers: { "Content-Type": "application/json" } }, // 502 Bad Gateway
     );
@@ -122,5 +150,10 @@ async function handler(req: Request): Promise<Response> {
 }
 
 const port = Deno.env.get("PORT") ? parseInt(Deno.env.get("PORT")!) : 8000;
-console.log(`[Forwarder] Deno server starting on http://localhost:${port}`);
-serve(handler, { port });
+console.log(`[Forwarder] Deno server attempting to start on port: ${port}`);
+serve(handler, { 
+  port: port,
+  onListen({ port, hostname }) {
+    console.log(`[Forwarder] ✅ Server successfully listening on http://${hostname}:${port}`);
+  }
+});
