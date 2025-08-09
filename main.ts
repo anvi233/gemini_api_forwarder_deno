@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts"; // Use a recent stable version
 import { load } from "https://deno.land/std@0.224.0/dotenv/mod.ts";
-// 
+
 // Load .env for local development (Deno Deploy uses its own env var system)
 if (Deno.env.get("DENO_DEPLOYMENT_ID") === undefined) {
   try {
@@ -14,7 +14,6 @@ if (Deno.env.get("DENO_DEPLOYMENT_ID") === undefined) {
     }
   }
 }
-
 
 const GOOGLE_API_KEY = Deno.env.get("GOOGLE_API_KEY");
 const GEMINI_API_TARGET_BASE = Deno.env.get("GEMINI_API_TARGET_BASE") || "https://generativelanguage.googleapis.com";
@@ -33,7 +32,6 @@ async function handler(req: Request): Promise<Response> {
   });
   console.log(
     `[Forwarder] <<< Incoming Request: ${req.method} ${req.url}`
-    // `Headers: ${JSON.stringify(incomingHeadersForLog)}` // Can be too verbose, uncomment if needed
   );
 
   if (!GOOGLE_API_KEY) {
@@ -49,7 +47,6 @@ async function handler(req: Request): Promise<Response> {
   // Handle simple root path requests (e.g., browser access or health checks)
   if (requestUrl.pathname === "/" && req.method === "GET") {
     console.log("[Forwarder] Received GET request for root path. Responding with status message.");
-    // Return a simple text response indicating the service is running
     return new Response(
       "Gemini API Forwarder is running. Use specific API paths for requests (e.g., /v1beta/models/your-model:generateContent).",
       { status: 200, headers: { "Content-Type": "text/plain" } },
@@ -60,24 +57,19 @@ async function handler(req: Request): Promise<Response> {
   const targetPath = requestUrl.pathname; // This should be the path the SDK intended for Google
   const targetSearchParams = requestUrl.searchParams.toString(); // Preserve query params if any
   // Construct the full target URL for Google's API
-  // The SDK client should already be forming the correct path (e.g. /v1beta/models/...)
-  // So we just prepend Google's base URL.
   let fullTargetUrl = `${GEMINI_API_TARGET_BASE}${targetPath}`;
   if (targetSearchParams) {
     fullTargetUrl += `?${targetSearchParams}`;
   }
 
   // IMPORTANT: Append the API key as a query parameter
-  // This is how the generativelanguage.googleapis.com endpoint expects the key.
   const keySeparator = fullTargetUrl.includes("?") ? "&" : "?";
   fullTargetUrl += `${keySeparator}key=${GOOGLE_API_KEY}`;
 
   console.log(`[Forwarder] Received ${req.method} request for: ${requestUrl.pathname}`);
-  // Safer redaction for logging
-  const loggedTargetUrl = GOOGLE_API_KEY 
+  const loggedTargetUrl = GOOGLE_API_KEY
     ? fullTargetUrl.replace(GOOGLE_API_KEY, "GOOGLE_API_KEY_REDACTED")
     : fullTargetUrl;
-  // console.log(`[Forwarder] Forwarding to Google API: ${loggedTargetUrl}`); // Old log
   console.log(
     `[Forwarder] >>> Forwarding to Google: ${req.method} ${loggedTargetUrl.substring(0, loggedTargetUrl.indexOf('?key=') + 5)}GOOGLE_API_KEY_REDACTED`
   );
@@ -85,47 +77,38 @@ async function handler(req: Request): Promise<Response> {
   try {
     let clientRequestBody: BodyInit | null = null;
     if (req.method === "POST" || req.method === "PUT" || req.method === "PATCH") {
-        // Check if there's a body and if it's not already consumed
-        if (req.body && !req.bodyUsed) {
-            // Try to parse as JSON, but forward as is if not JSON
-            const contentType = req.headers.get("content-type")?.toLowerCase();
-            if (contentType && contentType.includes("application/json")) {
-                const rawBody = await req.text(); // Read body as text first
-                try {
-                    JSON.parse(rawBody); // Validate if it's JSON by attempting to parse
-                    clientRequestBody = rawBody; // Forward the original raw body (which is valid JSON text)
-                    // console.log(`[Forwarder] Forwarding JSON body: ${clientRequestBody}`);
-                } catch (e) {
-                    console.warn(
-                        "[Forwarder] Incoming body declared as JSON but failed to parse. Forwarding as raw text. Error:",
-                        e.message // Log only the error message for brevity
-                    );
-                    clientRequestBody = rawBody; // Forward the raw text anyway, as the client sent it
-                }
-            } else {
-                 clientRequestBody = req.body; // Forward the stream directly
-            }
+      if (req.body && !req.bodyUsed) {
+        const contentType = req.headers.get("content-type")?.toLowerCase();
+        if (contentType && contentType.includes("application/json")) {
+          const rawBody = await req.text();
+          try {
+            JSON.parse(rawBody);
+            clientRequestBody = rawBody;
+          } catch (e) {
+            console.warn(
+              "[Forwarder] Incoming body declared as JSON but failed to parse. Forwarding as raw text. Error:",
+              e.message
+            );
+            clientRequestBody = rawBody;
+          }
+        } else {
+          clientRequestBody = req.body;
         }
+      }
     }
 
-    const headersToGoogle = new Headers(req.headers); // Start with client headers
-    // Potentially remove or modify certain headers before forwarding if needed
-    // e.g., headersToGoogle.delete('host'); // Deno's fetch will set the correct host
+    const headersToGoogle = new Headers(req.headers);
 
     const geminiResponse = await fetch(fullTargetUrl, {
       method: req.method,
-      headers: headersToGoogle, // Forward (potentially modified) headers
+      headers: headersToGoogle,
       body: clientRequestBody,
-      redirect: "follow", // Let fetch handle redirects if any from Google
+      redirect: "follow",
     });
 
     console.log(`[Forwarder] <<< Google API response status: ${geminiResponse.status} ${geminiResponse.statusText}`);
 
-    // Create new headers for the response to the client, copying from Google's response
     const responseHeaders = new Headers(geminiResponse.headers);
-    // console.log("[Forwarder] Headers received from Google:", Object.fromEntries(responseHeaders.entries())); // Uncomment for debugging
-    // Remove any Deno Deploy specific headers if necessary, or add CORS headers if needed
-    // For simplicity, we're copying all headers.
 
     return new Response(geminiResponse.body, {
       status: geminiResponse.status,
@@ -144,7 +127,7 @@ async function handler(req: Request): Promise<Response> {
         details: error.message || "Unknown error",
         cause: error.cause ? String(error.cause) : "No cause provided"
       }),
-      { status: 502, headers: { "Content-Type": "application/json" } }, // 502 Bad Gateway
+      { status: 502, headers: { "Content-Type": "application/json" } },
     );
   }
 }
@@ -156,4 +139,4 @@ serve(handler, {
   onListen({ port, hostname }) {
     console.log(`[Forwarder] ✅ Server successfully listening on http://${hostname}:${port}`);
   }
-)
+});
