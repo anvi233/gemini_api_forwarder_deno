@@ -50,68 +50,6 @@ async function handler(req: Request): Promise<Response> {
   if (requestUrl.pathname === "/" && req.method === "GET") {
     console.log("[Forwarder] Received GET request for root path. Responding with status message.");
     // Return a simple text response indicating the service is running
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     return new Response(
       "Gemini API Forwarder is running. Use specific API paths for requests (e.g., /v1beta/models/your-model:generateContent).",
       { status: 200, headers: { "Content-Type": "text/plain" } },
