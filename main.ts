@@ -156,3 +156,4 @@ serve(handler, {
   onListen({ port, hostname }) {
     console.log(`[Forwarder] ✅ Server successfully listening on http://${hostname}:${port}`);
   }
+)
